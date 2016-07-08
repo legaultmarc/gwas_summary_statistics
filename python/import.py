@@ -199,17 +199,19 @@ def parse_args():
     subparser.required = True
 
     # The chip import
-    parse_parser = subparser.add_parser(
+    import_array_parser = subparser.add_parser(
         "array",
         help="Import an array information.",
         parents=[parent_parser]
     )
 
-    group = parse_parser.add_argument_group("Input options")
+    group = import_array_parser.add_argument_group("Genotyping array option")
     group.add_argument(
         "--name", type=str, metavar="NAME", required=True,
         help="The name of the array.",
     )
+
+    group = import_array_parser.add_argument_group("Annotation file")
     group.add_argument(
         "--annotation", type=str, metavar="FILE", required=True,
         help="The annotation provided by the chip.",
@@ -230,9 +232,11 @@ def parse_args():
         "--geno", type=str, metavar="FIELD", default="geno",
         help="The field containing the genotype. [%(default)s]",
     )
+
+    group = import_array_parser.add_argument_group("Reference")
     group.add_argument(
         "--reference", type=str, metavar="FILE", required=True,
-        help="The human reference.",
+        help="The human reference fasta file.",
     )
 
     return parser.parse_args()
