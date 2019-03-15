@@ -1,0 +1,15 @@
+dataset_name: cardiogram_plus_c4d_2018
+dataset_description: >
+    This is a description of the dataset. As an example, it would be a good
+    idea to copy/paste the publication's abstract.
+pmid: 12345 # Pubmed ID to the reference
+url: http://www.statgen.org/ # The URL to the consortium home page
+
+components:
+    - trait_name: cad
+      raw_url: http://  # The url to download the file
+      formatted_file: path  # The path to the formatted, bgzipped file
+      n_cases: 1
+      n_controls: 1
+      n: 1
+      effect_type: beta # Could be OR, HR, etc.
