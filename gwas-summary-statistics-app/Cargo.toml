@@ -1,0 +1,10 @@
+[package]
+name = "gwas-summary-statistics-app"
+version = "0.1.0"
+authors = ["Marc André Legault <legaultmarc@gmail.com>"]
+edition = "2018"
+
+
+[dependencies]
+statrs = "0.6.0"
+genepa_rs = { path = "/Users/legaultmarc/projects/geneparse-rust", package = "genepa_rs" }
