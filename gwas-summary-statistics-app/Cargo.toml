@@ -6,5 +6,9 @@ edition = "2018"
 
 
 [dependencies]
+walkdir = "2"
 statrs = "0.6.0"
+serde = "1.0"
+serde_yaml = "0.8"
+serde_derive = "1.0"
 genepa_rs = { path = "/Users/legaultmarc/projects/geneparse-rust", package = "genepa_rs" }
