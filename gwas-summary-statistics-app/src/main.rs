@@ -1,9 +1,20 @@
 mod gwasss;
 
-use std::env;
-
 #[macro_use]
 extern crate serde_derive;
+
+#[macro_use]
+extern crate enum_display_derive;
+
+extern crate clap;
+extern crate csv;
+
+extern crate genepa_rs;
+
+use std::error::Error;
+use clap::{Arg, ArgGroup, ArgMatches, App, SubCommand, AppSettings};
+use crate::gwasss::{Dataset};
+use genepa_rs::Variant;
 
 
 #[derive(Debug)]
@@ -65,15 +76,75 @@ fn parse_variantfile(args: &Vec<String>) -> Result<VariantFile, &'static str> {
 }
 
 
-fn cmd_variant_effect_matrix(datasets: Vec<gwasss::Dataset>, vf: VariantFile) {
-    println!("{:#?}", datasets);
-    println!("{:#?}", vf);
+fn _parse_variant_from_args(args: &clap::ArgMatches)
+    -> Result<Variant, Box<Error>> {
 
-    // TODO
-    // let variants: Iterator<Type=Variant> = vf.load_variants()
-    // For all datasets, extract the variants into a Hash of:
-    // Variant -> {"dataset:component": stat}
-    // This will likely be a reusable stucture
+    Ok(Variant::new(
+        String::from(""),  // We don't care about the name and it's not optional yet.
+        String::from(args.value_of("chrom").unwrap()),
+        String::from(args.value_of("pos").unwrap()).parse()?,
+        (String::from(args.value_of("ref_allele").unwrap()),
+         String::from(args.value_of("coded_allele").unwrap())),
+    ))
+}
+
+
+fn cmd_extract_variant(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
+    // Results should look like:
+    // (all coded alleles should be the same)
+    // variant_name, chrom, pos, reference_allele, coded_allele,
+    // dataset_name, component_name, population, sex, effect_type
+    // effect, se, p
+
+    // Parse the variant from the parameters.
+    let v = _parse_variant_from_args(args)
+        .expect("Could not parse variant from command arguments.");
+
+    let output = args.value_of("output").unwrap();
+
+    let mut writer = csv::WriterBuilder::new().from_path(output)
+        .expect("Could not open file for writing");
+
+    // Header
+    writer.write_record(&[
+        "dataset_variant_name", "chrom", "pos",
+        "reference_allele", "coded_allele",
+        "dataset_name", "component_name", "population", "sex", "effect_type",
+        "effect", "se", "p"
+    ]).expect("Could not write header");
+
+    // Extract variant if possible for every dataset.
+    for dataset in datasets {
+        for component in dataset.components {
+            match component.get_stats_for_variant(
+                &v, args.value_of("coded_allele").unwrap()
+            ) {
+                Ok(ref mut stat) => {
+                    // The variant was found.
+                    writer.write_record(&[
+                        &stat.variant.name,
+                        &v.chrom.name,
+                        &v.position.to_string(),
+                        stat.get_reference_allele(),
+                        stat.get_coded_allele(),
+                        &dataset.name,
+                        &component.trait_name,
+                        &component.population.to_string(),
+                        &component.sex.to_string(),
+                        &component.effect_type.to_string(),
+                        &stat.effect.to_string(),
+                        &stat.se.to_string(),
+                        &stat.p.to_string()
+                    ]).expect("Could not write variant to output file.");
+                },
+                Err(e) => println!("{} :: {:?}", e, component)
+            }
+        }
+    }
+
+    writer.flush().expect("Broken flush");
+
+}
 
 
 fn main() {
@@ -124,43 +195,79 @@ fn main() {
     //   --variants-filename my_file \
     //   --variants-format {bim, vcf, stats} \
 
-    let mut args: Vec<String> = env::args().skip(1).collect();
+    let matches = App::new("Gwas Summary Statistics CLI")
+        .version("0.9")
+        .author("Marc-André Legault")
+        .about("Interface to query summary statistics from large GWAS \
+                consortia.")
 
-    // Parse the root argument which is always required.
-    let root_fn_idx = match args.iter().position(|x| x.as_str() == "--root") {
-        Some(idx) => {
-            // Check if we can parse the root.
-            if idx + 1 >= args.len() {
-                panic!("Need to provide a filename after --root");
-            }
-            idx + 1
-        },
-        None => panic!("Need to provide a --root")
-    };
+        .setting(AppSettings::SubcommandRequired)
 
-    let root_fn = &args[root_fn_idx].to_string();
+        .arg(Arg::with_name("root")
+            .long("root")
+            .value_name("root_path")
+            .help("Root directory from which manifests will be searched.")
+            .takes_value(true)
+            .required(true))
 
-    // Load the datasets from the root.
+        .subcommand(SubCommand::with_name("extract-region")
+            .about("Extract a genomic region.")
+            .arg(Arg::with_name("region")
+                .long("region")
+                .help("Region of the form chrom:start-end (e.g. \
+                      15:1234567-1253192")
+                .takes_value(true)
+                .required(true))
+        )
+
+        .subcommand(SubCommand::with_name("extract-variant")
+            .about("Extract the effect of a single variant on all components.")
+            .arg(Arg::with_name("chrom")
+                .long("chrom")
+                .help("Chromosome of the variant")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("pos")
+                .long("pos")
+                .help("Position of the variant")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("ref_allele")
+                .long("reference_allele")
+                .short("ref")
+                .help("Non-coded allele of the variant")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("coded_allele")
+                .long("coded_allele")
+                .short("coded")
+                .help("Coded allele of the variant")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("output")
+                .long("output")
+                .short("o")
+                .help("Output filename (csv format)")
+                .takes_value(true)
+                .default_value("extracted_variant.csv"))
+        )
+
+        .get_matches();
+
+    // Find and parse datasets from the root.
     let datasets = gwasss::load_datasets_from_manifests(
-        gwasss::find_manifests(root_fn)
+        gwasss::find_manifests(matches.value_of("root").unwrap())
     );
 
-    // Log.
-    println!("Found and loaded {} datasets.", datasets.len());
-
-    args.drain(..(root_fn_idx + 1));
-
-    // Next up after --root is the command name.
-    let command: Vec<String> = args.drain(..1).collect();
-    let command = &command[0];
-
-    match command.as_str() {
-        "variant-effect-matrix" => {
-            // variant-effect-matrix takes VariantFile
-            let vf = parse_variantfile(&args).unwrap();
-            cmd_variant_effect_matrix(datasets, vf);
+    match matches.subcommand_name() {
+        Some("extract-variant") => {
+            cmd_extract_variant(
+                datasets,
+                matches.subcommand_matches("extract-variant").unwrap()
+            );
         },
-        _ => println!("Unknown command '{:?}'", command)
+        Some(cmd) => println!("Command '{}' isn't supported yet.", cmd),
+        None => panic!("No subcommand provided")
     }
 
 }

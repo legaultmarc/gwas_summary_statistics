@@ -11,4 +11,7 @@ statrs = "0.6.0"
 serde = "1.0"
 serde_yaml = "0.8"
 serde_derive = "1.0"
+clap = "~2.32.0"
+csv = "1"
+enum-display-derive = "0.1"
 genepa_rs = { path = "/Users/legaultmarc/projects/geneparse-rust", package = "genepa_rs" }

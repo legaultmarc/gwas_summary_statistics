@@ -1,10 +1,10 @@
 extern crate walkdir;
-extern crate statrs;
 
 extern crate serde_derive;
 extern crate serde_yaml;
 extern crate genepa_rs;
 
+use std::fmt::Display;
 use std::process::{Command, Stdio};
 use std::io::{BufReader, BufRead, Read};
 use std::fs::File;
@@ -18,7 +18,7 @@ use walkdir::WalkDir;
 use genepa_rs::Variant;
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Display, Deserialize)]
 pub enum EffectType {
     Beta,
     OR,
@@ -27,7 +27,7 @@ pub enum EffectType {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Display, Deserialize)]
 pub enum Sex {
     Male,
     Female,
@@ -37,7 +37,7 @@ pub enum Sex {
 impl Default for Sex { fn default() -> Self { Sex::Both } }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Display, Deserialize)]
 pub enum Population {
     EUR,
     AIS,
@@ -48,7 +48,7 @@ pub enum Population {
 impl Default for Population { fn default() -> Self { Population::EUR } }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Display, Deserialize)]
 pub enum CodedAllele {
     A1Coded,
     A2Coded
@@ -56,38 +56,47 @@ pub enum CodedAllele {
 
 #[derive(Debug, Deserialize)]
 pub struct Dataset {
-    name: String,
-    description: String,
-    pmid: Option<u32>,
-    url: Option<String>,
-    components: Vec<Component>
+    pub name: String,
+    pub description: String,
+    pub pmid: Option<u32>,
+    pub url: Option<String>,
+    pub components: Vec<Component>
 }
 
 
 #[derive(Debug, Deserialize)]
 pub struct Component {
-    trait_name: String,
-    raw_url: Option<String>,
-    formatted_file: String,
+    pub trait_name: String,
+    pub raw_url: Option<String>,
+    pub formatted_file: String,
 
     #[serde(default)]
-    population: Population,
+    pub population: Population,
 
     #[serde(default)]
-    sex: Sex,
+    pub sex: Sex,
 
-    effect_type: EffectType,
-    n_cases: Option<u32>,
-    n_controls: Option<u32>,
-    n: Option<u32>,
+    pub effect_type: EffectType,
+    pub n_cases: Option<u32>,
+    pub n_controls: Option<u32>,
+    pub n: Option<u32>,
 }
 
 
 #[allow(dead_code)]
 impl Component {
     // Get association statistics for a single variant.
-    pub fn get_stats_for_variant(&self, v: &Variant)
+    // the coded_allele argument makes sure that the results are flipped
+    // as required.
+    pub fn get_stats_for_variant(&self, v: &Variant, coded_allele: &str)
         -> Result<AssociationStat, &'static str> {
+
+        // Check that the required coded allele is an allelic form of the
+        // variant.
+        if coded_allele != v.alleles.0 && coded_allele != v.alleles.1 {
+            return Err("Provided coded allele is not an allele of the \
+                        variant.");
+        }
 
         let region = format!(
             "{}:{}-{}", v.chrom.name, v.position, v.position
@@ -95,8 +104,8 @@ impl Component {
 
         let tabix = TabixSummaryStats::new(&self.formatted_file, &region);
 
-        // Convert to vector, filter out errors and 
-        let mut v: Vec<AssociationStat> = tabix
+        // Convert the tabix results to a vector and filter irrelevant entries.
+        let mut vec: Vec<AssociationStat> = tabix
             .into_iter()
             .filter_map(|result| {
                 // Keep only statistics matching the variant.
@@ -109,13 +118,24 @@ impl Component {
             })
             .collect();
 
-
-        if v.len() == 0 {
+        if vec.len() == 0 {
             return Err("Could not find variant in statistics file.");
         }
 
-        else if v.len() == 1 {
-            return Ok(v.pop().unwrap());
+        else if vec.len() == 1 {
+            let mut stat = vec.pop().unwrap();
+
+            // Express the stats according to coded_allele.
+            let current_coded_allele = match stat.coded_allele {
+                CodedAllele::A1Coded => &stat.variant.alleles.0,
+                CodedAllele::A2Coded => &stat.variant.alleles.1
+            };
+
+            if current_coded_allele != coded_allele {
+                stat.flip_coded_allele(&self.effect_type);
+            }
+
+            return Ok(stat);
         }
 
         else {
@@ -160,8 +180,8 @@ impl Iterator for TabixSummaryStats {
             let line = s.unwrap();
             let str_vec = Vec::from_iter(line.split('\t'));
 
-            let reference_allele = str_vec[3].to_string();
-            let coded_allele = str_vec[4].to_string();
+            let reference_allele = str_vec[3].to_string().to_uppercase();
+            let coded_allele = str_vec[4].to_string().to_uppercase();
 
             let v = Variant::new(
                 str_vec[0].to_string(),  // name
@@ -188,6 +208,7 @@ impl Iterator for TabixSummaryStats {
                 coded_allele: coded_allele_pos,
                 effect: str_vec[5].parse().unwrap(),
                 se: str_vec[6].parse().unwrap(),
+                p: str_vec[7].parse().unwrap()
             };
 
             return Some(Ok(assoc));
@@ -200,10 +221,46 @@ impl Iterator for TabixSummaryStats {
 
 #[derive(Debug)]
 pub struct AssociationStat {
-    variant: Variant,
-    coded_allele: CodedAllele,
-    effect: f32,
-    se: f32
+    pub variant: Variant,
+    pub coded_allele: CodedAllele,
+    pub effect: f32,
+    pub se: f32,
+    pub p: f32
+}
+
+
+impl AssociationStat {
+    pub fn get_reference_allele(&self) -> &str {
+        match self.coded_allele {
+            CodedAllele::A1Coded => &self.variant.alleles.1,
+            CodedAllele::A2Coded => &self.variant.alleles.0,
+        }
+    }
+
+    pub fn get_coded_allele(&self) -> &str {
+        match self.coded_allele {
+            CodedAllele::A1Coded => &self.variant.alleles.0,
+            CodedAllele::A2Coded => &self.variant.alleles.1,
+        }
+    }
+
+    pub fn flip_coded_allele(&mut self, effect_type: &EffectType) {
+        match effect_type {
+            EffectType::OR | EffectType::HR => {
+                let beta = -self.effect.ln();
+                self.effect = beta.exp();
+            },
+            EffectType::Beta => self.effect = -self.effect,
+            EffectType::Other => panic!(
+                "Could not flip coded allele for unknown effect type."
+            )
+        };
+
+        match self.coded_allele {
+            CodedAllele::A1Coded => self.coded_allele = CodedAllele::A2Coded,
+            CodedAllele::A2Coded => self.coded_allele = CodedAllele::A1Coded,
+        };
+    }
 }
 
 
