@@ -39,42 +39,6 @@ struct ComponentsPair {
 }
 
 
-fn parse_variantfile(args: &Vec<String>) -> Result<VariantFile, &'static str> {
-    // Out of bound by default so we can know if they were not found.
-    let mut variants_filename_idx = args.len();
-    let mut variants_format_idx = args.len();
-
-    for (i, arg) in args.iter().enumerate() {
-        match arg.as_str() {
-            "--variants-filename" => variants_filename_idx = i + 1,
-            "--variants-format" => variants_format_idx = i + 1,
-            _ => ()
-        }
-    }
-
-    // Make sure both arguments were provided
-    if variants_filename_idx >= args.len() {
-        return Err("Provide --variants-filename");
-    }
-
-    else if variants_format_idx >= args.len() {
-        return Err("Provide --variants-format");
-    }
-
-    // Match the format to an enum
-    let format = match args[variants_format_idx].as_str() {
-        "vcf" => VariantsFormat::VCF,
-        "bim" => VariantsFormat::BIM,
-        "stat" => VariantsFormat::STAT,
-        _ => { return Err("Invalid --variants-format (use vcf, bim, stat)") }
-    };
-
-    Ok(VariantFile {
-        variants_filename: args[variants_filename_idx].to_string(),
-        variants_format: format
-    })
-}
-
 
 fn _parse_variant_from_args(args: &clap::ArgMatches)
     -> Result<Variant, Box<Error>> {
@@ -89,13 +53,63 @@ fn _parse_variant_from_args(args: &clap::ArgMatches)
 }
 
 
-fn cmd_extract_variant(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
-    // Results should look like:
-    // (all coded alleles should be the same)
-    // variant_name, chrom, pos, reference_allele, coded_allele,
-    // dataset_name, component_name, population, sex, effect_type
-    // effect, se, p
+// Write a CSV entry for a statistics result on a given dataset and component.
+fn _write_csv_row(writer: &mut csv::Writer<std::fs::File>,
+                  dataset: &gwasss::Dataset,
+                  component: &gwasss::Component,
+                  stat: &gwasss::AssociationStat) {
 
+    writer.write_record(&[
+        &stat.variant.name,
+        &stat.variant.chrom.name,
+        &stat.variant.position.to_string(),
+        stat.get_reference_allele(),
+        stat.get_coded_allele(),
+        &dataset.name,
+        &component.trait_name,
+        &component.population.to_string(),
+        &component.sex.to_string(),
+        &component.effect_type.to_string(),
+        &stat.effect.to_string(),
+        &stat.se.to_string(),
+        &stat.p.to_string()
+    ]).expect("Could not write variant to output file.");
+
+}
+
+
+fn cmd_extract_region(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
+    let region = args.value_of("region").unwrap().to_string();
+    let output = args.value_of("output").unwrap();
+
+    let mut writer = csv::WriterBuilder::new().from_path(output)
+        .expect("Could not open file for writing");
+
+    writer.write_record(&[
+        "dataset_variant_name", "chrom", "pos",
+        "reference_allele", "coded_allele",
+        "dataset_name", "component_name", "population", "sex", "effect_type",
+        "effect", "se", "p"
+    ]).expect("Could not write header");
+
+    for dataset in datasets.iter() {
+        for component in dataset.components.iter() {
+            for mut result in component.get_stats_for_region(&region) {
+                match result {
+                    Ok(ref mut stat) => {
+                        _write_csv_row(&mut writer, &dataset, &component,
+                                       stat);
+                    },
+                    Err(e) => println!("{} :: {:?}", e, component)
+                }
+            }
+        }
+    }
+
+}
+
+
+fn cmd_extract_variant(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
     // Parse the variant from the parameters.
     let v = _parse_variant_from_args(args)
         .expect("Could not parse variant from command arguments.");
@@ -114,28 +128,14 @@ fn cmd_extract_variant(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
     ]).expect("Could not write header");
 
     // Extract variant if possible for every dataset.
-    for dataset in datasets {
-        for component in dataset.components {
+    for dataset in datasets.iter() {
+        for component in dataset.components.iter() {
             match component.get_stats_for_variant(
                 &v, args.value_of("coded_allele").unwrap()
             ) {
                 Ok(ref mut stat) => {
                     // The variant was found.
-                    writer.write_record(&[
-                        &stat.variant.name,
-                        &v.chrom.name,
-                        &v.position.to_string(),
-                        stat.get_reference_allele(),
-                        stat.get_coded_allele(),
-                        &dataset.name,
-                        &component.trait_name,
-                        &component.population.to_string(),
-                        &component.sex.to_string(),
-                        &component.effect_type.to_string(),
-                        &stat.effect.to_string(),
-                        &stat.se.to_string(),
-                        &stat.p.to_string()
-                    ]).expect("Could not write variant to output file.");
+                    _write_csv_row(&mut writer, &dataset, &component, stat)
                 },
                 Err(e) => println!("{} :: {:?}", e, component)
             }
@@ -218,6 +218,12 @@ fn main() {
                       15:1234567-1253192")
                 .takes_value(true)
                 .required(true))
+            .arg(Arg::with_name("output")
+                .long("output")
+                .short("o")
+                .help("Output filename (csv format)")
+                .takes_value(true)
+                .default_value("extracted_region.csv"))
         )
 
         .subcommand(SubCommand::with_name("extract-variant")
@@ -264,6 +270,12 @@ fn main() {
             cmd_extract_variant(
                 datasets,
                 matches.subcommand_matches("extract-variant").unwrap()
+            );
+        },
+        Some("extract-region") => {
+            cmd_extract_region(
+                datasets,
+                matches.subcommand_matches("extract-region").unwrap()
             );
         },
         Some(cmd) => println!("Command '{}' isn't supported yet.", cmd),
