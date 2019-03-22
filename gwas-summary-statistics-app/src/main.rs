@@ -78,19 +78,30 @@ fn _write_csv_row(writer: &mut csv::Writer<std::fs::File>,
 }
 
 
-fn cmd_extract_region(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
-    let region = args.value_of("region").unwrap().to_string();
-    let output = args.value_of("output").unwrap();
-
-    let mut writer = csv::WriterBuilder::new().from_path(output)
+fn _init_writer<I, T>(path: &str, header: I) -> csv::Writer<std::fs::File>
+    where I: IntoIterator<Item=T>, T: AsRef<[u8]>
+{
+    let mut writer = csv::WriterBuilder::new().from_path(path)
         .expect("Could not open file for writing");
 
-    writer.write_record(&[
+    writer.write_record(header).expect("Could not write header");
+
+    writer
+}
+
+fn _init_writer_default(path: &str) -> csv::Writer<std::fs::File> {
+    _init_writer(path, &[
         "dataset_variant_name", "chrom", "pos",
         "reference_allele", "coded_allele",
-        "dataset_name", "component_name", "population", "sex", "effect_type",
-        "effect", "se", "p"
-    ]).expect("Could not write header");
+        "dataset_name", "component_name", "population", "sex",
+        "effect_type", "effect", "se", "p"
+    ])
+}
+
+
+fn cmd_extract_region(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
+    let region = args.value_of("region").unwrap().to_string();
+    let mut writer = _init_writer_default(args.value_of("output").unwrap());
 
     for dataset in datasets.iter() {
         for component in dataset.components.iter() {
@@ -114,18 +125,7 @@ fn cmd_extract_variant(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
     let v = _parse_variant_from_args(args)
         .expect("Could not parse variant from command arguments.");
 
-    let output = args.value_of("output").unwrap();
-
-    let mut writer = csv::WriterBuilder::new().from_path(output)
-        .expect("Could not open file for writing");
-
-    // Header
-    writer.write_record(&[
-        "dataset_variant_name", "chrom", "pos",
-        "reference_allele", "coded_allele",
-        "dataset_name", "component_name", "population", "sex", "effect_type",
-        "effect", "se", "p"
-    ]).expect("Could not write header");
+    let mut writer = _init_writer_default(args.value_of("output").unwrap());
 
     // Extract variant if possible for every dataset.
     for dataset in datasets.iter() {
@@ -147,29 +147,50 @@ fn cmd_extract_variant(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
 }
 
 
+fn cmd_extract_variants(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
+    // Read the variants using the right reader.
+    let format = args.value_of("variants_format").unwrap();
+    let filename = args.value_of("variants_filename").unwrap();
+
+    let variant_iterator = if format == "vcf" {
+        panic!("Can't read VCF files yet.");
+    }
+    else if format == "bim" {
+        panic!("Can't read BIM files yet.");
+    }
+    else if format == "stat" {
+        gwasss::SummaryStatsFile::read_file(filename)
+    }
+    else {
+        panic!(format!("Unknown format '{}'", format));
+    };
+
+    // Keep only the variants.
+    let variants: Vec<Variant> = variant_iterator
+        .map(|x| x.unwrap().variant).collect();
+
+    // Get an output writer.
+    let mut writer = _init_writer_default(args.value_of("output").unwrap());
+
+    for dataset in datasets.iter() {
+        for component in dataset.components.iter() {
+            for v in variants.iter() {
+                match component.get_stats_for_variant(v, &v.alleles.0) {
+                    Ok(ref mut stat) => {
+                        _write_csv_row(&mut writer, &dataset, &component,
+                                       stat);
+                    },
+                    Err(e) => println!("{:?}", e)
+                }
+            }
+        }
+    }
+
+}
+
+
 fn main() {
     // Here is the CLI I would like:
-    //
-    // summary-stats \
-    //   --root /data/project/summary_statistics \
-    //   variant-effect-matrix \
-    //   --variants-filename my_file \
-    //   --variants-format {bim, vcf, stats}
-    //
-    // summary-stats \
-    //   --root /data/project/summary_statistics \
-    //   extract-variant \
-    //   --chrom 3 \
-    //   --pos 123456 \
-    //   --reference_allele A \
-    //   --coded_allele G
-    //
-    // summary-stats \
-    //   --root /data/project/summary_statistics \
-    //   extract-region \
-    //   --chrom 3 \
-    //   --start 123456 \
-    //   --end 127456
     //
     // summary-stats \
     //   --root /data/project/summary_statistics \
@@ -226,6 +247,30 @@ fn main() {
                 .default_value("extracted_region.csv"))
         )
 
+        .subcommand(SubCommand::with_name("extract-variants")
+            .about("Extract a discrete set of variants represented in a file \
+                    fith the 'summary statistics' format.")
+            .arg(Arg::with_name("variants_filename")
+                .long("variants-filename")
+                .short("i")
+                .help("Filename containing the input variants.")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("variants_format")
+                .long("variants-format")
+                .short("f")
+                .help("File format containing the variants.")
+                .takes_value(true)
+                .possible_values(&["stat", "vcf", "bim"])
+                .required(true))
+            .arg(Arg::with_name("output")
+                .long("output")
+                .short("o")
+                .help("Output filename (csv format)")
+                .takes_value(true)
+                .default_value("extracted_variants.csv"))
+        )
+
         .subcommand(SubCommand::with_name("extract-variant")
             .about("Extract the effect of a single variant on all components.")
             .arg(Arg::with_name("chrom")
@@ -270,6 +315,12 @@ fn main() {
             cmd_extract_variant(
                 datasets,
                 matches.subcommand_matches("extract-variant").unwrap()
+            );
+        },
+        Some("extract-variants") => {
+            cmd_extract_variants(
+                datasets,
+                matches.subcommand_matches("extract-variants").unwrap()
             );
         },
         Some("extract-region") => {

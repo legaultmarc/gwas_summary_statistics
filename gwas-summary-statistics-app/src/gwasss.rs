@@ -102,7 +102,7 @@ impl Component {
             "{}:{}-{}", v.chrom.name, v.position, v.position
         );
 
-        let tabix = TabixSummaryStats::new(&self.formatted_file, &region);
+        let tabix = SummaryStatsFile::tabix(&self.formatted_file, &region);
 
         // Convert the tabix results to a vector and filter irrelevant entries.
         let mut vec: Vec<AssociationStat> = tabix
@@ -144,19 +144,19 @@ impl Component {
         }
     }
 
-    pub fn get_stats_for_region(&self, region: &str) -> TabixSummaryStats{
-        TabixSummaryStats::new(&self.formatted_file, region)
+    pub fn get_stats_for_region(&self, region: &str) -> SummaryStatsFile {
+        SummaryStatsFile::tabix(&self.formatted_file, region)
     }
 }
 
 
-pub struct TabixSummaryStats {
+pub struct SummaryStatsFile {
     iter: Box<Iterator<Item=std::io::Result<String>>>
 }
 
 
-impl TabixSummaryStats {
-    fn new(filename: &str, region: &str) -> TabixSummaryStats {
+impl SummaryStatsFile {
+    pub fn tabix(filename: &str, region: &str) -> SummaryStatsFile {
         // Spawn the process for the iterator.
         let output = Command::new("tabix")
             .arg(filename)
@@ -165,14 +165,46 @@ impl TabixSummaryStats {
             .spawn()
             .expect("Tabix failed");
 
-        TabixSummaryStats {
+        SummaryStatsFile {
             iter: Box::new(BufReader::new(output.stdout.unwrap()).lines())
         }
     }
+
+    pub fn read_file(filename: &str) -> SummaryStatsFile {
+        let f = File::open(filename)
+            .expect(&format!("Couldn't open file: {:?}", filename));
+
+        let mut iter = BufReader::new(f).lines();
+
+        // Because there is a header, we skip it and assume the columns
+        // are defined as per the spec.
+        iter.next();
+
+        SummaryStatsFile { iter: Box::new(iter) }
+    }
 }
 
-impl Iterator for TabixSummaryStats {
-    type Item = Result<AssociationStat, &'static str>;
+
+fn _split_line_to_variant(fields: &Vec<&str>) -> (Variant, CodedAllele) {
+    let reference_allele = fields[3].to_string().to_uppercase();
+    let coded_allele = fields[4].to_string().to_uppercase();
+
+    let v = Variant::new(
+        fields[0].to_string(),  // name
+        fields[1].to_string(),  // chrom
+        fields[2].to_string().parse().unwrap(),  // pos
+        (reference_allele, coded_allele.clone())  // alleles
+    );
+
+    let code = if coded_allele == v.alleles.0 { CodedAllele::A1Coded }
+               else { CodedAllele::A2Coded };
+
+    (v, code)
+}
+
+
+impl Iterator for SummaryStatsFile {
+    type Item = Result<AssociationStat, Box<str>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(s) = self.iter.next() {
@@ -180,32 +212,11 @@ impl Iterator for TabixSummaryStats {
             let line = s.unwrap();
             let str_vec = Vec::from_iter(line.split('\t'));
 
-            let reference_allele = str_vec[3].to_string().to_uppercase();
-            let coded_allele = str_vec[4].to_string().to_uppercase();
-
-            let v = Variant::new(
-                str_vec[0].to_string(),  // name
-                str_vec[1].to_string(),  // chrom
-                str_vec[2].to_string().parse().unwrap(),  // pos
-                (reference_allele.clone(), coded_allele.clone())  // alleles
-            );
-
-            // Check if coded allele is first or second.
-            let coded_allele_pos = if (reference_allele == v.alleles.0) &&
-                                      (coded_allele == v.alleles.1) {
-                CodedAllele::A2Coded
-            }
-            else if (reference_allele == v.alleles.1) &&
-                    (coded_allele == v.alleles.0) {
-                CodedAllele::A1Coded
-            }
-            else {
-                return Some(Err("Bad allele parsing in summary stats file."));
-            };
+            let (v, code) = _split_line_to_variant(&str_vec);
 
             let assoc = AssociationStat {
                 variant: v,
-                coded_allele: coded_allele_pos,
+                coded_allele: code,
                 effect: str_vec[5].parse().unwrap(),
                 se: str_vec[6].parse().unwrap(),
                 p: str_vec[7].parse().unwrap()
@@ -298,7 +309,7 @@ pub fn load_datasets_from_manifests(manifests: Vec<String>) -> Vec<Dataset> {
 }
 
 
-pub fn sanitize_dataset(dataset: &mut Dataset, meta_path: &Path) {
+fn _sanitize_dataset(dataset: &mut Dataset, meta_path: &Path) {
     // For now, the only thing we may want to do is to expand the formatted
     // file path for components and make sure they exist.
     //
@@ -324,7 +335,7 @@ pub fn load_dataset_from_manifest(manifest: &str)
 
     let mut dataset: Dataset = serde_yaml::from_str(&contents)?;
 
-    sanitize_dataset(&mut dataset, &Path::new(manifest));
+    _sanitize_dataset(&mut dataset, &Path::new(manifest));
 
     Ok(dataset)
 }
