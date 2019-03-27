@@ -231,11 +231,14 @@ struct _ComponentFilter {
     trait_name: String,
     population: Option<gwasss::Population>,
     sex: Option<gwasss::Sex>,
+
+    #[serde(default)]
+    applied: bool
 }
 
 
 impl _ComponentFilter {
-    fn matches(&self, component: &gwasss::Component) -> bool {
+    fn matches(&mut self, component: &gwasss::Component) -> bool {
 
         if self.trait_name != component.trait_name {
             return false;
@@ -253,6 +256,7 @@ impl _ComponentFilter {
             }
         }
 
+        self.applied = true;
         true
     }
 }
@@ -276,10 +280,10 @@ fn filter_datasets(set_file: &str, datasets: Vec<Dataset>)
     -> Vec<Dataset>
 {
     // Load filters from yaml.
-    let filters = load_filters(set_file).unwrap();
+    let mut filters = load_filters(set_file).unwrap();
 
     // Datasets to keep (ones that are in set file)
-    let keep_datasets: HashSet<&String> = filters.keys().collect();
+    let keep_datasets: HashSet<String> = filters.keys().cloned().collect();
 
     // New vector to hold the filtered datasets.
     let mut clean_datasets: Vec<Dataset> = Vec::new();
@@ -287,19 +291,30 @@ fn filter_datasets(set_file: &str, datasets: Vec<Dataset>)
     for mut dataset in datasets {
         if keep_datasets.contains(&dataset.name) {
             // The dataset was requested apply filter to components.
-            let component_filters = filters.get(&dataset.name).unwrap();
+            let component_filters = filters.get_mut(&dataset.name).unwrap();
 
             // If there is filtering to be done on components.
             if component_filters.len() > 0 {
                 let mut new_components: Vec<gwasss::Component> = Vec::new();
 
                 for ref component in dataset.components {
-                    if component_filters.iter().any(|f| f.matches(component)) {
+                    if component_filters.iter_mut().any(|f| f.matches(component)) {
                         new_components.push(component.to_owned());
                     }
                 }
 
                 dataset.components = new_components;
+            }
+
+            // Check if some filters have not been used.
+            let unapplied: Vec<_> = component_filters
+                .iter()
+                .filter(|f| !f.applied)
+                .collect();
+
+            if unapplied.len() > 0 {
+                println!("WARN: Unapplied component filters for {}:\n{:?}",
+                         &dataset.name, unapplied);
             }
 
             clean_datasets.push(dataset);
