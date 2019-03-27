@@ -18,7 +18,7 @@ use walkdir::WalkDir;
 use genepa_rs::Variant;
 
 
-#[derive(Debug, Display, Deserialize)]
+#[derive(Debug, Display, Deserialize, PartialEq, Clone)]
 pub enum EffectType {
     Beta,
     OR,
@@ -27,7 +27,7 @@ pub enum EffectType {
 }
 
 
-#[derive(Debug, Display, Deserialize)]
+#[derive(Debug, Display, Deserialize, PartialEq, Clone)]
 pub enum Sex {
     Male,
     Female,
@@ -37,7 +37,7 @@ pub enum Sex {
 impl Default for Sex { fn default() -> Self { Sex::Both } }
 
 
-#[derive(Debug, Display, Deserialize)]
+#[derive(Debug, Display, Deserialize, PartialEq, Clone)]
 pub enum Population {
     EUR,
     AIS,
@@ -48,13 +48,13 @@ pub enum Population {
 impl Default for Population { fn default() -> Self { Population::EUR } }
 
 
-#[derive(Debug, Display, Deserialize)]
+#[derive(Debug, Display, Deserialize, PartialEq, Clone)]
 pub enum CodedAllele {
     A1Coded,
     A2Coded
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Dataset {
     pub name: String,
     pub description: String,
@@ -64,7 +64,7 @@ pub struct Dataset {
 }
 
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Component {
     pub trait_name: String,
     pub raw_url: Option<String>,

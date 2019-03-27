@@ -12,6 +12,9 @@ extern crate csv;
 extern crate genepa_rs;
 
 use std::error::Error;
+use std::io::{Read};
+use std::fs::File;
+use std::collections::{HashMap, HashSet};
 use clap::{Arg, App, SubCommand, AppSettings};
 use crate::gwasss::{Dataset};
 use genepa_rs::{Variant, OrderedAllelesVariant};
@@ -223,6 +226,90 @@ fn cmd_extract_variants(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
 }
 
 
+#[derive(Debug, Deserialize)]
+struct _ComponentFilter {
+    trait_name: String,
+    population: Option<gwasss::Population>,
+    sex: Option<gwasss::Sex>,
+}
+
+
+impl _ComponentFilter {
+    fn matches(&self, component: &gwasss::Component) -> bool {
+
+        if self.trait_name != component.trait_name {
+            return false;
+        }
+
+        if let Some(pop) = &self.population {
+            if pop != &component.population {
+                return false;
+            }
+        }
+
+        if let Some(sex) = &self.sex {
+            if sex != &component.sex {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+
+type _DatasetFilter = HashMap<String, Vec<_ComponentFilter>>;
+fn load_filters(component_set: &str)
+    -> Result<_DatasetFilter, serde_yaml::Error>
+{
+    let mut f = File::open(component_set).expect("Unable to open set file.");
+    let mut contents = String::new();
+    f.read_to_string(&mut contents).expect("Unable to read set file.");
+
+    let dataset_filter: _DatasetFilter = serde_yaml::from_str(&contents)?;
+
+    Ok(dataset_filter)
+}
+
+
+fn filter_datasets(set_file: &str, datasets: Vec<Dataset>)
+    -> Vec<Dataset>
+{
+    // Load filters from yaml.
+    let filters = load_filters(set_file).unwrap();
+
+    // Datasets to keep (ones that are in set file)
+    let keep_datasets: HashSet<&String> = filters.keys().collect();
+
+    // New vector to hold the filtered datasets.
+    let mut clean_datasets: Vec<Dataset> = Vec::new();
+
+    for mut dataset in datasets {
+        if keep_datasets.contains(&dataset.name) {
+            // The dataset was requested apply filter to components.
+            let component_filters = filters.get(&dataset.name).unwrap();
+
+            // If there is filtering to be done on components.
+            if component_filters.len() > 0 {
+                let mut new_components: Vec<gwasss::Component> = Vec::new();
+
+                for ref component in dataset.components {
+                    if component_filters.iter().any(|f| f.matches(component)) {
+                        new_components.push(component.to_owned());
+                    }
+                }
+
+                dataset.components = new_components;
+            }
+
+            clean_datasets.push(dataset);
+        }
+    }
+
+    clean_datasets
+}
+
+
 fn main() {
     // Here is the CLI I would like:
     //
@@ -264,6 +351,11 @@ fn main() {
             .help("Root directory from which manifests will be searched.")
             .takes_value(true)
             .required(true))
+        .arg(Arg::with_name("trait_set")
+            .long("trait-set")
+            .value_name("trait_set")
+            .help("YAML file containing sets of traits to extract.")
+            .takes_value(true))
 
         .subcommand(SubCommand::with_name("extract-region")
             .about("Extract a genomic region.")
@@ -340,9 +432,14 @@ fn main() {
         .get_matches();
 
     // Find and parse datasets from the root.
-    let datasets = gwasss::load_datasets_from_manifests(
+    let mut datasets = gwasss::load_datasets_from_manifests(
         gwasss::find_manifests(matches.value_of("root").unwrap())
     );
+
+    // Filter if need with respect to the trait set.
+    if let Some(set_file) = matches.value_of("trait_set") {
+        datasets = filter_datasets(set_file, datasets);
+    }
 
     match matches.subcommand_name() {
         Some("extract-variant") => {
