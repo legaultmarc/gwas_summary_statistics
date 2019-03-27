@@ -20,29 +20,6 @@ use crate::gwasss::{Dataset};
 use genepa_rs::{Variant, OrderedAllelesVariant};
 
 
-#[derive(Debug)]
-enum VariantsFormat {
-    VCF,
-    BIM,
-    STAT
-}
-
-
-#[derive(Debug)]
-struct VariantFile {
-    variants_filename: String,
-    variants_format: VariantsFormat
-}
-
-
-#[derive(Debug)]
-struct ComponentsPair {
-    x: String,
-    y: String
-}
-
-
-
 fn _parse_variant_from_args(args: &clap::ArgMatches)
     -> Result<Variant, Box<Error>> {
 
@@ -113,7 +90,16 @@ fn cmd_extract_region(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
 
     for dataset in datasets.iter() {
         for component in dataset.components.iter() {
-            for mut result in component.get_stats_for_region(&region) {
+
+            let mut results = match component.get_stats_for_region(&region) {
+                Ok(iter) => iter,
+                Err(e) => {
+                    println!("Error getting data for component: {}", e); // TODO
+                    continue;
+                }
+            };
+
+            for mut result in results {
                 match result {
                     Ok(ref mut stat) => {
                         _write_csv_row(&mut writer, &dataset, &component,
@@ -145,7 +131,7 @@ fn cmd_extract_variant(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
                     // The variant was found.
                     _write_csv_row(&mut writer, &dataset, &component, stat)
                 },
-                Err(e) => println!("{} :: {:?}", e, component)
+                Err(e) => eprintln!("{:?}", e)
             }
         }
     }
@@ -170,7 +156,16 @@ fn cmd_extract_variants(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
     else if format == "stat" {
         // If we read the variants from a summary statistics file, we align
         // the allele with respect to the coded allele.
-        gwasss::SummaryStatsFile::read_file(filename)
+        //
+        let reader = match gwasss::SummaryStatsFile::read_file(filename) {
+            Ok(iter) => iter,
+            Err(e) => panic!(
+                "Could not read input variants from the provided statistics \
+                file: '{}': {}", &filename, e
+            )
+        };
+
+        reader
             .map(|stat| {
                 let stat = stat.unwrap();
 
@@ -217,7 +212,26 @@ fn cmd_extract_variants(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
                         _write_csv_row(&mut writer, &dataset, &component,
                                        stat);
                     },
-                    Err(e) => println!("WARN: {} - {:?}", &oav.variant, e)
+                    Err(e) => {
+                        match e {
+                            gwasss::ComponentQueryError::TabixError(msg) => {
+                                eprintln!("{}", msg);
+                                break;
+                            },
+                            gwasss::ComponentQueryError::NotFound(v, msg) => {
+                                eprintln!(
+                                    "[missing_snp]: {} - dataset:{} > component {} \
+                                     (population:{}, sex:{}); details: {:?}",
+                                    &oav.variant, &dataset.name, &component.trait_name,
+                                    &component.population, &component.sex, msg
+                                );
+                                    },
+                            gwasss::ComponentQueryError::BadInput(msg) => {
+                                panic!(msg);
+                            }
+                        }
+
+                    }
                 }
             }
         }
@@ -322,6 +336,20 @@ fn filter_datasets(set_file: &str, datasets: Vec<Dataset>)
     }
 
     clean_datasets
+}
+
+
+fn log_datasets(datasets: &Vec<Dataset>, root: &str) {
+    eprintln!("Loaded {} datasets from root '{}'", datasets.len(), root);
+    datasets.iter().for_each(|d| {
+        eprintln!("\t[dataset] '{}'", d.name);
+        d.components.iter().for_each(|c| {
+            eprintln!(
+                "\t\t- component > '{}' (population:{}, sex:{})",
+                c.trait_name, c.population, c.sex
+            );
+        });
+    });
 }
 
 
@@ -447,14 +475,18 @@ fn main() {
         .get_matches();
 
     // Find and parse datasets from the root.
+    let root = matches.value_of("root").unwrap();
+
     let mut datasets = gwasss::load_datasets_from_manifests(
-        gwasss::find_manifests(matches.value_of("root").unwrap())
+        gwasss::find_manifests(root)
     );
 
     // Filter if need with respect to the trait set.
     if let Some(set_file) = matches.value_of("trait_set") {
         datasets = filter_datasets(set_file, datasets);
     }
+
+    log_datasets(&datasets, root);
 
     match matches.subcommand_name() {
         Some("extract-variant") => {

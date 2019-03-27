@@ -94,26 +94,38 @@ pub struct VariantIndices {
 }
 
 
+#[derive(Debug)]
+pub enum ComponentQueryError<'a> {
+    TabixError(String),
+    NotFound(&'a Variant, String),
+    BadInput(String)
+}
+
+
 #[allow(dead_code)]
 impl Component {
     // Get association statistics for a single variant.
     // the coded_allele argument makes sure that the results are flipped
     // as required.
-    pub fn get_stats_for_variant(&self, v: &Variant, coded_allele: &str)
-        -> Result<AssociationStat, &'static str> {
+    pub fn get_stats_for_variant<'a>(&self, v: &'a Variant, coded_allele: &str)
+        -> Result<AssociationStat, ComponentQueryError<'a>> {
 
         // Check that the required coded allele is an allelic form of the
         // variant.
         if coded_allele != v.alleles.0 && coded_allele != v.alleles.1 {
-            return Err("Provided coded allele is not an allele of the \
-                        variant.");
+            return Err(ComponentQueryError::BadInput(
+                "Provided coded allele is not an allele of the variant."
+                .to_string()));
         }
 
         let region = format!(
             "{}:{}-{}", v.chrom.name, v.position, v.position
         );
 
-        let tabix = SummaryStatsFile::tabix(&self.formatted_file, &region);
+        let tabix = match SummaryStatsFile::tabix(&self.formatted_file, &region) {
+            Ok(o) => o,
+            Err(e) => { return Err(ComponentQueryError::TabixError(e)); }
+        };
 
         // Convert the tabix results to a vector and filter irrelevant entries.
         let mut vec: Vec<AssociationStat> = tabix
@@ -130,7 +142,9 @@ impl Component {
             .collect();
 
         if vec.len() == 0 {
-            return Err("Could not find variant in statistics file.");
+            return Err(ComponentQueryError::NotFound(
+                v, "Could not find variant in statistics file.".to_string()
+            ));
         }
 
         else if vec.len() == 1 {
@@ -150,12 +164,17 @@ impl Component {
         }
 
         else {
-            return Err("Variant has multiple entries in the summary \
-                        statistics file");
+            return Err(ComponentQueryError::NotFound(
+                v,
+                "Variant has multiple entries in the summary statistics \
+                 file".to_string()
+             ));
         }
     }
 
-    pub fn get_stats_for_region(&self, region: &str) -> SummaryStatsFile {
+    pub fn get_stats_for_region(&self, region: &str)
+        -> Result<SummaryStatsFile, String>
+    {
         SummaryStatsFile::tabix(&self.formatted_file, region)
     }
 }
@@ -200,21 +219,37 @@ pub struct SummaryStatsFile {
 
 
 impl SummaryStatsFile {
-    pub fn tabix(filename: &str, region: &str) -> SummaryStatsFile {
+    pub fn tabix(filename: &str, region: &str)
+        -> Result<SummaryStatsFile, String>
+    {
         // Spawn the process for the iterator.
-        let output = Command::new("tabix")
+        let mut output = Command::new("tabix")
             .arg(filename)
             .arg(region)
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("Tabix failed");
 
-        SummaryStatsFile {
-            iter: Box::new(BufReader::new(output.stdout.unwrap()).lines())
+        if let Ok(status) = &output.wait() {
+            if !status.success() {
+                return Err(
+                    format!(
+                        "Tabix exited with an error; does '{}' exist?",
+                        &filename
+                    )
+                );
+            }
         }
+
+        Ok(SummaryStatsFile {
+            iter: Box::new(BufReader::new(output.stdout.unwrap()).lines())
+        })
     }
 
-    pub fn read_file(filename: &str) -> SummaryStatsFile {
+    pub fn read_file(filename: &str)
+        -> Result<SummaryStatsFile, String>
+    {
         let f = File::open(filename)
             .expect(&format!("Couldn't open file: {:?}", filename));
 
@@ -224,7 +259,7 @@ impl SummaryStatsFile {
         // are defined as per the spec.
         iter.next();
 
-        SummaryStatsFile { iter: Box::new(iter) }
+        Ok(SummaryStatsFile { iter: Box::new(iter) })
     }
 }
 
