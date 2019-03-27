@@ -74,6 +74,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "genepa_rs"
 version = "0.1.0"
+source = "git+ssh://git@github.com/legaultmarc/genepa-rs.git#018ced11d97b4656738cc481c062ff8264dddddc"
 
 [[package]]
 name = "gwas-summary-statistics-app"
@@ -82,7 +83,7 @@ dependencies = [
  "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "csv 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "enum-display-derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "genepa_rs 0.1.0",
+ "genepa_rs 0.1.0 (git+ssh://git@github.com/legaultmarc/genepa-rs.git)",
  "serde 1.0.89 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.89 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_yaml 0.8.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -352,6 +353,7 @@ dependencies = [
 "checksum dtoa 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)" = "6d301140eb411af13d3115f9a562c85cc6b541ade9dfa314132244aaee7489dd"
 "checksum enum-display-derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "53f76eb63c4bfc6fce5000f106254701b741fc9a65ee08445fde0ff39e583f1c"
 "checksum fuchsia-cprng 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
+"checksum genepa_rs 0.1.0 (git+ssh://git@github.com/legaultmarc/genepa-rs.git)" = "<none>"
 "checksum libc 0.2.50 (registry+https://github.com/rust-lang/crates.io-index)" = "aab692d7759f5cd8c859e169db98ae5b52c924add2af5fbbca11d12fefb567c1"
 "checksum linked-hash-map 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "70fb39025bc7cdd76305867c4eccf2f2dcf6e9a57f5b21a93e1c2d86cd03ec9e"
 "checksum memchr 2.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "2efc7bc57c883d4a4d6e3246905283d8dae951bb3bd32f49d6ef297f546e1c39"

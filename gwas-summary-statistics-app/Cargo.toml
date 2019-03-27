@@ -14,4 +14,4 @@ serde_derive = "1.0"
 clap = "~2.32.0"
 csv = "1"
 enum-display-derive = "0.1"
-genepa_rs = { path = "/Users/legaultmarc/projects/geneparse-rust", package = "genepa_rs" }
+genepa_rs = { git = "ssh://git@github.com/legaultmarc/genepa-rs.git", package = "genepa_rs" }
