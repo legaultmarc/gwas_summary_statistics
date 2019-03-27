@@ -12,9 +12,9 @@ extern crate csv;
 extern crate genepa_rs;
 
 use std::error::Error;
-use clap::{Arg, ArgGroup, ArgMatches, App, SubCommand, AppSettings};
+use clap::{Arg, App, SubCommand, AppSettings};
 use crate::gwasss::{Dataset};
-use genepa_rs::Variant;
+use genepa_rs::{Variant, OrderedAllelesVariant};
 
 
 #[derive(Debug)]
@@ -59,6 +59,11 @@ fn _write_csv_row(writer: &mut csv::Writer<std::fs::File>,
                   component: &gwasss::Component,
                   stat: &gwasss::AssociationStat) {
 
+    // Format small p-values.
+    let fmt_p = if stat.p < 0.05 {
+        format!("{:e}", stat.p)
+    } else { stat.p.to_string() };
+
     writer.write_record(&[
         &stat.variant.name,
         &stat.variant.chrom.name,
@@ -72,7 +77,7 @@ fn _write_csv_row(writer: &mut csv::Writer<std::fs::File>,
         &component.effect_type.to_string(),
         &stat.effect.to_string(),
         &stat.se.to_string(),
-        &stat.p.to_string()
+        &fmt_p
     ]).expect("Could not write variant to output file.");
 
 }
@@ -152,35 +157,64 @@ fn cmd_extract_variants(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
     let format = args.value_of("variants_format").unwrap();
     let filename = args.value_of("variants_filename").unwrap();
 
-    let variant_iterator = if format == "vcf" {
+    let variants: Vec<OrderedAllelesVariant> = if format == "vcf" {
         panic!("Can't read VCF files yet.");
     }
     else if format == "bim" {
-        panic!("Can't read BIM files yet.");
+        // Assume coded is A1 (minor allele).
+        genepa_rs::plink::BimReader::new(filename).collect()
     }
     else if format == "stat" {
+        // If we read the variants from a summary statistics file, we align
+        // the allele with respect to the coded allele.
         gwasss::SummaryStatsFile::read_file(filename)
+            .map(|stat| {
+                let stat = stat.unwrap();
+
+                match stat.coded_allele {
+                    gwasss::CodedAllele::A1Coded => {
+                        OrderedAllelesVariant {
+                            variant: stat.variant, a1_idx: 0
+                        }
+                    },
+                    gwasss::CodedAllele::A2Coded => {
+                        OrderedAllelesVariant {
+                            variant: stat.variant, a1_idx: 1
+                        }
+                    }
+                }
+            }).collect()
     }
     else {
         panic!(format!("Unknown format '{}'", format));
     };
-
-    // Keep only the variants.
-    let variants: Vec<Variant> = variant_iterator
-        .map(|x| x.unwrap().variant).collect();
 
     // Get an output writer.
     let mut writer = _init_writer_default(args.value_of("output").unwrap());
 
     for dataset in datasets.iter() {
         for component in dataset.components.iter() {
-            for v in variants.iter() {
-                match component.get_stats_for_variant(v, &v.alleles.0) {
+            // Iterate over ordered allele variants.
+            // The "coded" allele is always 'A1'.
+            for oav in variants.iter() {
+                let coded_allele = if oav.a1_idx == 0 {
+                    &oav.variant.alleles.0
+                }
+                else if oav.a1_idx == 1 {
+                    &oav.variant.alleles.1
+                }
+                else {
+                    panic!("Bad alleles.");
+                };
+
+                match component.get_stats_for_variant(
+                    &oav.variant, coded_allele
+                ) {
                     Ok(ref mut stat) => {
                         _write_csv_row(&mut writer, &dataset, &component,
                                        stat);
                     },
-                    Err(e) => println!("{:?}", e)
+                    Err(e) => println!("WARN: {} - {:?}", &oav.variant, e)
                 }
             }
         }
@@ -284,13 +318,13 @@ fn main() {
                 .takes_value(true)
                 .required(true))
             .arg(Arg::with_name("ref_allele")
-                .long("reference_allele")
+                .long("reference-allele")
                 .short("ref")
                 .help("Non-coded allele of the variant")
                 .takes_value(true)
                 .required(true))
             .arg(Arg::with_name("coded_allele")
-                .long("coded_allele")
+                .long("coded-allele")
                 .short("coded")
                 .help("Coded allele of the variant")
                 .takes_value(true)

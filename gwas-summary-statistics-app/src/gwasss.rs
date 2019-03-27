@@ -83,6 +83,17 @@ pub struct Component {
 }
 
 
+// Describe the columns containing variant fields.
+#[derive(Debug)]
+pub struct VariantIndices {
+    pub name: usize,
+    pub chrom: usize,
+    pub pos: usize,
+    pub a1: usize,
+    pub a2: usize,
+}
+
+
 #[allow(dead_code)]
 impl Component {
     // Get association statistics for a single variant.
@@ -150,6 +161,39 @@ impl Component {
 }
 
 
+fn _split_line_to_variant(fields: &Vec<&str>) -> (Variant, CodedAllele) {
+    let idx = VariantIndices {
+        name: 0,
+        chrom: 1,
+        pos: 2,
+        a1: 3,
+        a2: 4
+    };
+
+    _split_line_to_variant_using_idx(fields, &idx)
+}
+
+
+fn _split_line_to_variant_using_idx(fields: &Vec<&str>, idx: &VariantIndices)
+    -> (Variant, CodedAllele)
+{
+    let reference_allele = fields[idx.a1].to_string().to_uppercase();
+    let coded_allele = fields[idx.a2].to_string().to_uppercase();
+
+    let v = Variant::new(
+        fields[idx.name].to_string(),  // name
+        fields[idx.chrom].to_string(),  // chrom
+        fields[idx.pos].to_string().parse().unwrap(),  // pos
+        (reference_allele, coded_allele.clone())  // alleles
+    );
+
+    let code = if coded_allele == v.alleles.0 { CodedAllele::A1Coded }
+               else { CodedAllele::A2Coded };
+
+    (v, code)
+}
+
+
 pub struct SummaryStatsFile {
     iter: Box<Iterator<Item=std::io::Result<String>>>
 }
@@ -183,25 +227,6 @@ impl SummaryStatsFile {
         SummaryStatsFile { iter: Box::new(iter) }
     }
 }
-
-
-fn _split_line_to_variant(fields: &Vec<&str>) -> (Variant, CodedAllele) {
-    let reference_allele = fields[3].to_string().to_uppercase();
-    let coded_allele = fields[4].to_string().to_uppercase();
-
-    let v = Variant::new(
-        fields[0].to_string(),  // name
-        fields[1].to_string(),  // chrom
-        fields[2].to_string().parse().unwrap(),  // pos
-        (reference_allele, coded_allele.clone())  // alleles
-    );
-
-    let code = if coded_allele == v.alleles.0 { CodedAllele::A1Coded }
-               else { CodedAllele::A2Coded };
-
-    (v, code)
-}
-
 
 impl Iterator for SummaryStatsFile {
     type Item = Result<AssociationStat, Box<str>>;
