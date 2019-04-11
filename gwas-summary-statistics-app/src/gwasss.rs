@@ -296,7 +296,7 @@ pub struct AssociationStat {
     pub coded_allele: CodedAllele,
     pub effect: f32,
     pub se: f32,
-    pub p: f32
+    pub p: f64
 }
 
 
