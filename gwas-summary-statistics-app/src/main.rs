@@ -131,7 +131,7 @@ fn cmd_extract_variant(datasets: Vec<Dataset>, args: &clap::ArgMatches) {
                     // The variant was found.
                     _write_csv_row(&mut writer, &dataset, &component, stat)
                 },
-                Err(e) => eprintln!("{:?}", e)
+                Err(e) => eprintln!("{:?} ({:?})", e, component)
             }
         }
     }
